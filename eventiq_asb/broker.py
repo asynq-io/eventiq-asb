@@ -64,23 +64,19 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
             raw_message.delivery_count is not None and raw_message.delivery_count <= 3
         )
 
-    async def ack(self, raw_message: ServiceBusReceivedMessage) -> None:
-        ...
+    async def ack(self, raw_message: ServiceBusReceivedMessage) -> None: ...
 
     async def nack(
         self, raw_message: ServiceBusReceivedMessage, delay: int | None = None
-    ):
-        ...
+    ): ...
 
     async def publish(
         self, message: CloudEvent, encoder: Encoder | None = None, **kwargs
-    ) -> None:
-        ...
+    ) -> None: ...
 
     async def sender(
         self,
         group: str,
         consumer: Consumer,
         send_stream: MemoryObjectSendStream[ServiceBusReceivedMessage],
-    ):
-        ...
+    ): ...
