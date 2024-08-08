@@ -21,7 +21,7 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: CPython",
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
-dependencies = ["eventiq==0.3.0rc1", "azure-servicebus"]
+dependencies = ["eventiq>=1.0.0", "azure-servicebus"]
 
 [project.urls]
 Documentation = "https://github.com/asynq-io/eventiq-asb#readme"
@@ -32,14 +32,7 @@ Source = "https://github.com/asynq-io/eventiq-asb"
 path = "eventiq_asb/__about__.py"
 
 [tool.hatch.envs.default]
-dependencies = [
-    "pytest",
-    "pyyaml",
-    "pytest-cov",
-    "ruff",
-    "mypy>=1.0.0",
-    "bandit",
-]
+dependencies = ["pytest", "pyyaml", "pytest-cov", "ruff", "mypy", "bandit"]
 
 [tool.hatch.envs.default.scripts]
 test = "pytest {args:tests}"
