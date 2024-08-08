@@ -82,6 +82,7 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
 
     @property
     def is_connected(self) -> bool:
+        # implement healthcheck
         return self._client is not None
 
     async def connect(self) -> None:
@@ -185,3 +186,17 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
                 id(raw_message),
                 str(raw_message),
             )
+
+    async def publish_bulk(
+        self,
+        messages: list[CloudEvent],
+        encoder: Encoder | None = None,
+        timeout: float | None = None,
+        **kwargs: Any,
+    ) -> None:
+        encoder = encoder or self.encoder
+
+        raw_messages = [
+            ServiceBusMessage(encoder.encode(msg), topic=msg.topic) for msg in messages
+        ]
+        await self.publisher.send_messages(raw_messages, timeout=timeout, **kwargs)
