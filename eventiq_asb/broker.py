@@ -31,7 +31,7 @@ class AzureServiceBusSettings(UrlBrokerSettings[AzureServiceBusUrl]):
 class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
     Settings = AzureServiceBusSettings
     protocol = "sb"
-
+    error_msg = "Broker is not connected"
     WILDCARD_ONE = "*"
     WILDCARD_MANY = "#"
 
@@ -51,22 +51,19 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
     @property
     def client(self) -> ServiceBusClient:
         if self._client is None:
-            msg = "Broker is not connected"
-            raise BrokerError(msg)
+            raise BrokerError(self.error_msg)
         return self._client
 
     @property
     def publisher(self) -> ServiceBusSender:
         if self._publisher is None:
-            msg = "Broker is not connected"
-            raise BrokerError(msg)
+            raise BrokerError(self.error_msg)
         return self._publisher
 
     @property
     def renever(self) -> AutoLockRenewer:
         if self._renever is None:
-            msg = "Broker is not connected"
-            raise BrokerError(msg)
+            raise BrokerError(self.error_msg)
         return self._renever
 
     @staticmethod
