@@ -10,6 +10,11 @@ def test_is_subclass():
 
 
 def test_settings():
-    os.environ["BROKER_URL"] = "sb://localhost:3333"
+    os.environ.update(
+        {
+            "BROKER_URL": "sb://localhost:3333",
+            "BROKER_TOPIC_NAME": "test_topic",
+        }
+    )
     broker = AzureServiceBusBroker.from_env()
     assert isinstance(broker, AzureServiceBusBroker)
