@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Annotated, Any
-from weakref import WeakValueDictionary
 
 from azure.servicebus import ServiceBusMessage, ServiceBusReceivedMessage
 from azure.servicebus.aio import (
@@ -52,9 +51,7 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
         self._client: ServiceBusClient | None = None
         self._publisher: ServiceBusSender | None = None
         self._renever: AutoLockRenewer | None = None
-        self._receivers: WeakValueDictionary[int, ServiceBusReceiver] = (
-            WeakValueDictionary()
-        )
+        self._receivers: dict[int, ServiceBusReceiver] = {}
 
     @property
     def client(self) -> ServiceBusClient:
@@ -116,6 +113,11 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
         body: bytes,
         *,
         headers: dict[str, str],
+        message_id: ID,
+        message_type: str,
+        message_content_type: str,
+        message_time: datetime,
+        message_source: str,
         **kwargs: Any,
     ) -> None:
         msg = self._build_message(topic, body, headers=headers, **kwargs)
@@ -215,9 +217,9 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
         topic: str,
         body: bytes,
         *,
-        message_id: ID | None = None,
+        message_id: ID,
+        message_content_type: str,
         session_id: str | None = None,
-        message_content_type: str | None = None,
         time_to_live: timedelta | None = None,
         scheduled_enqueue_time_utc: datetime | None = None,
         correlation_id: str | None = None,
@@ -233,7 +235,7 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
             subject=topic,
             application_properties=dict(headers.items()),
             session_id=session_id,
-            message_id=str(message_id) if message_id else None,
+            message_id=str(message_id),
             content_type=message_content_type,
             correlation_id=correlation_id,
             partition_key=partition_key,
