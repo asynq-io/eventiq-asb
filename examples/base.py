@@ -5,7 +5,7 @@ from eventiq_asb import AzureServiceBusBroker, DeadLetterQueueMiddleware
 service = Service(
     name="example-service",
     broker=AzureServiceBusBroker(
-        topic_name="example-topic", url="sb://example.servicebus.windows.net/"
+        topic="example-topic", url="sb://example.servicebus.windows.net/"
     ),
 )
 

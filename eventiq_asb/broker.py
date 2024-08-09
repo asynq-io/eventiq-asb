@@ -13,6 +13,7 @@ from azure.servicebus.aio import (
 from eventiq.broker import BulkMessage, UrlBroker
 from eventiq.exceptions import BrokerError
 from eventiq.settings import UrlBrokerSettings
+from eventiq.utils import to_float
 from pydantic import AnyUrl, UrlConstraints
 
 if TYPE_CHECKING:
@@ -39,13 +40,13 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
 
     def __init__(
         self,
-        topic_name: str,
+        topic: str,
         enable_lock_renewer: bool = True,
         batch_max_size: int | None = None,
         **extra: Any,
     ) -> None:
         super().__init__(**extra)
-        self.topic_name = topic_name
+        self.topic = topic
         self.enable_lock_renewer = enable_lock_renewer
         self.batch_max_size = batch_max_size
         self._client: ServiceBusClient | None = None
@@ -84,13 +85,15 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
 
     @property
     def is_connected(self) -> bool:
-        # implement healthcheck
-        return self._client is not None
+        if self._publisher:
+            self._publisher._check_live()  # noqa: SLF001
+            return True
+        return False
 
     async def connect(self) -> None:
         if self._client is None:
             self._client = ServiceBusClient.from_connection_string(self.url)
-            self._publisher = self._client.get_topic_sender(self.topic_name)
+            self._publisher = self._client.get_topic_sender(self.topic)
             if self.enable_lock_renewer:
                 self._renever = AutoLockRenewer()
 
@@ -120,8 +123,9 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
         message_source: str,
         **kwargs: Any,
     ) -> None:
+        publisher = self.client.get_topic_sender(topic)
         msg = self._build_message(topic, body, headers=headers, **kwargs)
-        await self.publisher.send_messages(msg)
+        await publisher.send_messages(msg)
 
     async def bulk_publish(
         self,
@@ -130,9 +134,8 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
     ) -> None:
         batch_message = await self.publisher.create_message_batch(self.batch_max_size)
         for message in messages:
-            message_topic = topic or message.topic
             msg = self._build_message(
-                message_topic,
+                message.topic,
                 message.body,
                 headers=message.headers,
                 **message.kwargs,
@@ -153,6 +156,7 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
             "prefetch_count", consumer.concurrency * 2
         )
         max_wait_time = consumer.options.get("max_wait_time", 5)
+        max_lock_duration = to_float(consumer.timeout) or self.default_consumer_timeout
         async with receiver, send_stream:
             while True:
                 received_msgs = await receiver.receive_messages(
@@ -166,7 +170,7 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
                         self._renever.register(
                             receiver,
                             msg,
-                            max_lock_renewal_duration=100,
+                            max_lock_renewal_duration=max_lock_duration,
                             on_lock_renew_failure=self._on_lock_renew_failure,
                         )  # register message for lock renewal if enabled
                     await send_stream.send(msg)
