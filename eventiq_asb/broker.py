@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from eventiq import Consumer
     from eventiq.types import ID, DecodedMessage
 
+
 AzureServiceBusUrl = Annotated[AnyUrl, UrlConstraints(allowed_schemes=["sb", "amqp"])]
 
 
@@ -230,7 +231,7 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
         return ServiceBusMessage(
             body,
             subject=topic,
-            application_properties=dict(**headers),
+            application_properties=dict(headers.items()),
             session_id=session_id,
             message_id=str(message_id) if message_id else None,
             content_type=message_content_type,
