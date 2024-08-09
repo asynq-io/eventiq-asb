@@ -40,13 +40,13 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
 
     def __init__(
         self,
-        topic: str,
+        topic_name: str,
         enable_lock_renewer: bool = True,
         batch_max_size: int | None = None,
         **extra: Any,
     ) -> None:
         super().__init__(**extra)
-        self.topic = topic
+        self.topic_name = topic_name
         self.enable_lock_renewer = enable_lock_renewer
         self.batch_max_size = batch_max_size
         self._client: ServiceBusClient | None = None
@@ -93,7 +93,7 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
     async def connect(self) -> None:
         if self._client is None:
             self._client = ServiceBusClient.from_connection_string(self.url)
-            self._publisher = self._client.get_topic_sender(self.topic)
+            self._publisher = self._client.get_topic_sender(self.topic_name)
             if self.enable_lock_renewer:
                 self._renever = AutoLockRenewer()
 
