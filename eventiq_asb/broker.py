@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import TYPE_CHECKING, Any
 
+import anyio
 from azure.servicebus import ServiceBusMessage, ServiceBusReceivedMessage
 from azure.servicebus.aio import (
     AutoLockRenewer,
@@ -11,10 +12,10 @@ from azure.servicebus.aio import (
     ServiceBusSession,
 )
 from eventiq.broker import BulkMessage, UrlBroker
-from eventiq.exceptions import BrokerError
-from eventiq.settings import UrlBrokerSettings
 from eventiq.utils import to_float
-from pydantic import AnyUrl, UrlConstraints
+
+from .manager import ServiceBusManager
+from .settings import AzureServiceBusSettings
 
 if TYPE_CHECKING:
     from datetime import datetime, timedelta
@@ -22,13 +23,6 @@ if TYPE_CHECKING:
     from anyio.streams.memory import MemoryObjectSendStream
     from eventiq import Consumer
     from eventiq.types import ID, DecodedMessage
-
-
-AzureServiceBusUrl = Annotated[AnyUrl, UrlConstraints(allowed_schemes=["sb", "amqp"])]
-
-
-class AzureServiceBusSettings(UrlBrokerSettings[AzureServiceBusUrl]):
-    topic_name: str
 
 
 class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
@@ -53,13 +47,20 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
         self._publisher: ServiceBusSender | None = None
         self._renever: AutoLockRenewer | None = None
         self._receivers: dict[int, ServiceBusReceiver] = {}
+        self._publisher_lock = anyio.Lock()
+        self._sb_manager: ServiceBusManager | None = None
 
     @property
     def client(self) -> ServiceBusClient:
         if self._client is None:
             raise self.connection_error
-            raise BrokerError(self.error_msg)
         return self._client
+
+    @property
+    def sb_manager(self) -> ServiceBusManager:
+        if self._sb_manager is None:
+            raise self.connection_error
+        return self._sb_manager
 
     @property
     def publisher(self) -> ServiceBusSender:
@@ -74,7 +75,7 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
 
     @staticmethod
     def decode_message(raw_message: ServiceBusReceivedMessage) -> DecodedMessage:
-        return raw_message.body, None
+        return next(raw_message.body), None
 
     @staticmethod
     def get_message_metadata(raw_message: ServiceBusReceivedMessage) -> dict[str, str]:
@@ -91,6 +92,9 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
         return False
 
     async def connect(self) -> None:
+        if not self._sb_manager:
+            self._sb_manager = ServiceBusManager(self.url)
+            await self._sb_manager.create_topic(self.topic_name)
         if self._client is None:
             self._client = ServiceBusClient.from_connection_string(self.url)
             self._publisher = self._client.get_topic_sender(self.topic_name)
@@ -116,16 +120,11 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
         body: bytes,
         *,
         headers: dict[str, str],
-        message_id: ID,
-        message_type: str,
-        message_content_type: str,
-        message_time: datetime,
-        message_source: str,
         **kwargs: Any,
     ) -> None:
-        publisher = self.client.get_topic_sender(topic)
-        msg = self._build_message(topic, body, headers=headers, **kwargs)
-        await publisher.send_messages(msg)
+        async with self._publisher_lock:
+            msg = self._build_message(topic, body, headers=headers, **kwargs)
+            await self.publisher.send_messages(msg)
 
     async def bulk_publish(
         self,
@@ -149,8 +148,11 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
         consumer: Consumer,
         send_stream: MemoryObjectSendStream[ServiceBusReceivedMessage],
     ) -> None:
+        await self.sb_manager.create_subscription(
+            topic_name=self.topic_name, subscription_name=consumer.topic
+        )
         receiver = self.client.get_subscription_receiver(
-            topic_name=consumer.topic, subscription_name=group
+            topic_name=self.topic_name, subscription_name=consumer.topic
         )
         prefetch_count = consumer.options.get(
             "prefetch_count", consumer.concurrency * 2
@@ -192,7 +194,8 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
         receiver = self._receivers.pop(
             id(raw_message), None
         )  # retrieve receiver reference for given message
-        if receiver:
+        # check if raw message is already settled else error is raised - private method
+        if receiver and not raw_message._settled:  # noqa: SLF001
             await receiver.complete_message(raw_message)
         else:
             self.logger.warning(
@@ -211,7 +214,7 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
             await receiver.abandon_message(raw_message)
         else:
             self.logger.warning(
-                "Cannot ack message %d: %s, receiver reference is missing",
+                "Cannot nack message %d: %s, receiver reference is missing",
                 id(raw_message),
                 str(raw_message),
             )
@@ -221,9 +224,9 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
         topic: str,
         body: bytes,
         *,
-        message_id: ID,
-        message_content_type: str,
+        message_id: ID | None = None,
         session_id: str | None = None,
+        message_content_type: str | None = None,
         time_to_live: timedelta | None = None,
         scheduled_enqueue_time_utc: datetime | None = None,
         correlation_id: str | None = None,
@@ -239,7 +242,7 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
             subject=topic,
             application_properties=dict(headers.items()),
             session_id=session_id,
-            message_id=str(message_id),
+            message_id=str(message_id) if message_id else None,
             content_type=message_content_type,
             correlation_id=correlation_id,
             partition_key=partition_key,
