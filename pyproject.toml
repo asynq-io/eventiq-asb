@@ -106,6 +106,7 @@ ignore = [
     "PLR2004",
     "PTH123",
     "S108",
+    "S101", # ignore asset usage in code
 
 ]
 

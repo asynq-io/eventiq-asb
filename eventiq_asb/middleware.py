@@ -40,9 +40,9 @@ class ServiceBusManagerMiddleware(Middleware):
         service: Service,
     ) -> None:
         super().__init__(service)
-        self.client = ServiceBusAdministrationClient.from_connection_string(
-            self.service.broker.url
-        )
+        assert isinstance(self.service.broker, AzureServiceBusBroker)
+        self.url = self.service.broker.url
+        self.client = ServiceBusAdministrationClient.from_connection_string(self.url)
         self.topic_name = self.service.broker.topic_name
 
     async def after_broker_connect(self) -> None:
