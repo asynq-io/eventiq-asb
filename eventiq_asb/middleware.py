@@ -122,6 +122,11 @@ class AutoLockRenewerMiddleware(Middleware[CloudEventType]):
             to_float(consumer.timeout) or self.service.broker.default_consumer_timeout
         )
         receiver = self.service.broker.get_message_receiver(message.raw)
+        if not receiver:
+            self.logger.warning(
+                "AutoLockRemover not found receiver for message %s", message.id
+            )
+            return
         self._renewer.register(
             receiver=receiver,
             renewable=message.raw,
