@@ -92,6 +92,7 @@ ignore = [
     "ARG004",
     "ANN401",
     "B008",    # do not perform function calls in argument defaults
+    "B101", # ignore asset usage in code
     "BLE001",
     "COM812",
     "D",
@@ -106,7 +107,6 @@ ignore = [
     "PLR2004",
     "PTH123",
     "S108",
-    "S101", # ignore asset usage in code
 
 ]
 
