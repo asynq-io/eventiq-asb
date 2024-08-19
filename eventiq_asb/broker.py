@@ -4,15 +4,8 @@ from typing import TYPE_CHECKING, Any
 
 import anyio
 from azure.servicebus import ServiceBusMessage, ServiceBusReceivedMessage
-from azure.servicebus.aio import (
-    AutoLockRenewer,
-    ServiceBusClient,
-    ServiceBusReceiver,
-    ServiceBusSender,
-    ServiceBusSession,
-)
+from azure.servicebus.aio import ServiceBusClient, ServiceBusReceiver, ServiceBusSender
 from eventiq.broker import BulkMessage, UrlBroker
-from eventiq.utils import to_float
 
 from .settings import AzureServiceBusSettings
 
@@ -34,17 +27,14 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
     def __init__(
         self,
         topic_name: str,
-        enable_lock_renewer: bool = True,
         batch_max_size: int | None = None,
         **extra: Any,
     ) -> None:
         super().__init__(**extra)
         self.topic_name = topic_name
-        self.enable_lock_renewer = enable_lock_renewer
         self.batch_max_size = batch_max_size
         self._client: ServiceBusClient | None = None
         self._publisher: ServiceBusSender | None = None
-        self._renewer: AutoLockRenewer | None = None
         self._receivers: dict[int, ServiceBusReceiver] = {}
         self._publisher_lock = anyio.Lock()
 
@@ -87,14 +77,10 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
         if self._client is None:
             self._client = ServiceBusClient.from_connection_string(self.url)
             self._publisher = self._client.get_topic_sender(self.topic_name)
-            if self.enable_lock_renewer:
-                self._renewer = AutoLockRenewer()
 
     async def disconnect(self) -> None:
         if self._publisher:
             await self._publisher.close()
-        if self._renewer:
-            await self._renewer.close()
         if self._client:
             await self._client.close()
 
@@ -144,7 +130,6 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
             "prefetch_count", consumer.concurrency * 2
         )
         max_wait_time = consumer.options.get("max_wait_time", 5)
-        max_lock_duration = to_float(consumer.timeout) or self.default_consumer_timeout
         async with receiver, send_stream:
             while True:
                 received_msgs = await receiver.receive_messages(
@@ -154,27 +139,7 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
                     self._receivers[id(msg)] = (
                         receiver  # store weak reference to receiver for ack/nack
                     )
-                    if self._renewer is not None:
-                        self._renewer.register(
-                            receiver,
-                            msg,
-                            max_lock_renewal_duration=max_lock_duration,
-                            on_lock_renew_failure=self._on_lock_renew_failure,
-                        )  # register message for lock renewal if enabled
                     await send_stream.send(msg)
-
-    async def _on_lock_renew_failure(
-        self,
-        renewable: ServiceBusSession | ServiceBusReceivedMessage,
-        exc: Exception | None,
-    ) -> None:
-        self.logger.warning(
-            "Lock renewal failed for message %d: %s",
-            id(renewable),
-            str(renewable),
-        )
-        if exc:
-            self.logger.warning("Lock renewal error:", exc_info=exc)
 
     async def ack(self, raw_message: ServiceBusReceivedMessage) -> None:
         receiver = self._receivers.pop(

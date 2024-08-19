@@ -1,16 +1,19 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from azure.core import exceptions
+from azure.servicebus.aio import AutoLockRenewer, ServiceBusSession
 from azure.servicebus.aio.management import ServiceBusAdministrationClient
 from azure.servicebus.management import CorrelationRuleFilter
 from eventiq.middleware import Middleware
 from eventiq.types import CloudEventType
+from eventiq.utils import to_float
 
 from .broker import AzureServiceBusBroker
 
 if TYPE_CHECKING:
+    from azure.servicebus import ServiceBusReceivedMessage
     from eventiq import Consumer, Service
     from eventiq.exceptions import Fail
 
@@ -97,3 +100,47 @@ class ServiceBusManagerMiddleware(Middleware):
     async def after_broker_disconnect(self) -> None:
         if self.client:
             await self.client.close()
+
+
+class AutoLockRenewerMiddleware(Middleware[CloudEventType]):
+    def __init__(self, service: Service) -> None:
+        super().__init__(service)
+        self._renewer: AutoLockRenewer = AutoLockRenewer()
+
+    async def before_process_message(
+        self,
+        *,
+        consumer: Consumer,
+        message: CloudEventType,
+        result: Any = None,
+        exc: Exception | None = None,
+    ) -> None:
+        if not isinstance(self.service.broker, AzureServiceBusBroker):
+            error = "Unsupported broker type"
+            raise TypeError(error)
+        max_lock_duration = (
+            to_float(consumer.timeout) or self.service.broker.default_consumer_timeout
+        )
+        receiver = self.service.broker.get_message_receiver(message.raw)
+        self._renewer.register(
+            receiver=receiver,
+            renewable=message.raw,
+            max_lock_renewal_duration=max_lock_duration,
+            on_lock_renew_failure=self._on_lock_renew_failure,
+        )
+
+    async def _on_lock_renew_failure(
+        self,
+        renewable: ServiceBusSession | ServiceBusReceivedMessage,
+        exc: Exception | None,
+    ) -> None:
+        self.logger.warning(
+            "Lock renewal failed for message %d: %s",
+            id(renewable),
+            str(renewable),
+        )
+        if exc:
+            self.logger.warning("Lock renewal error:", exc_info=exc)
+
+    async def after_broker_disconnect(self) -> None:
+        await self._renewer.close()
