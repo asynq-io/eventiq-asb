@@ -161,7 +161,7 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
         receiver = self._receivers.pop(
             id(raw_message), None
         )  # retrieve receiver reference for given message
-        if receiver:
+        if receiver and not raw_message._settled:  # noqa: SLF001
             await receiver.abandon_message(raw_message)
         else:
             self.logger.warning(
