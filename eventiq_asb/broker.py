@@ -14,7 +14,6 @@ from azure.servicebus.aio import (
 from eventiq.broker import BulkMessage, UrlBroker
 from eventiq.utils import to_float
 
-from .manager import ServiceBusManager
 from .settings import AzureServiceBusSettings
 
 if TYPE_CHECKING:
@@ -45,22 +44,15 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
         self.batch_max_size = batch_max_size
         self._client: ServiceBusClient | None = None
         self._publisher: ServiceBusSender | None = None
-        self._renever: AutoLockRenewer | None = None
+        self._renewer: AutoLockRenewer | None = None
         self._receivers: dict[int, ServiceBusReceiver] = {}
         self._publisher_lock = anyio.Lock()
-        self._sb_manager: ServiceBusManager | None = None
 
     @property
     def client(self) -> ServiceBusClient:
         if self._client is None:
             raise self.connection_error
         return self._client
-
-    @property
-    def sb_manager(self) -> ServiceBusManager:
-        if self._sb_manager is None:
-            raise self.connection_error
-        return self._sb_manager
 
     @property
     def publisher(self) -> ServiceBusSender:
@@ -92,20 +84,17 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
         return False
 
     async def connect(self) -> None:
-        if not self._sb_manager:
-            self._sb_manager = ServiceBusManager(self.url)
-            await self._sb_manager.create_topic(self.topic_name)
         if self._client is None:
             self._client = ServiceBusClient.from_connection_string(self.url)
             self._publisher = self._client.get_topic_sender(self.topic_name)
             if self.enable_lock_renewer:
-                self._renever = AutoLockRenewer()
+                self._renewer = AutoLockRenewer()
 
     async def disconnect(self) -> None:
         if self._publisher:
             await self._publisher.close()
-        if self._renever:
-            await self._renever.close()
+        if self._renewer:
+            await self._renewer.close()
         if self._client:
             await self._client.close()
 
@@ -148,9 +137,6 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
         consumer: Consumer,
         send_stream: MemoryObjectSendStream[ServiceBusReceivedMessage],
     ) -> None:
-        await self.sb_manager.create_subscription(
-            topic_name=self.topic_name, subscription_name=consumer.topic
-        )
         receiver = self.client.get_subscription_receiver(
             topic_name=self.topic_name, subscription_name=consumer.topic
         )
@@ -168,8 +154,8 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
                     self._receivers[id(msg)] = (
                         receiver  # store weak reference to receiver for ack/nack
                     )
-                    if self._renever is not None:
-                        self._renever.register(
+                    if self._renewer is not None:
+                        self._renewer.register(
                             receiver,
                             msg,
                             max_lock_renewal_duration=max_lock_duration,
@@ -224,9 +210,9 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
         topic: str,
         body: bytes,
         *,
-        message_id: ID | None = None,
+        message_id: ID,
+        message_content_type: str,
         session_id: str | None = None,
-        message_content_type: str | None = None,
         time_to_live: timedelta | None = None,
         scheduled_enqueue_time_utc: datetime | None = None,
         correlation_id: str | None = None,
@@ -242,7 +228,7 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
             subject=topic,
             application_properties=dict(headers.items()),
             session_id=session_id,
-            message_id=str(message_id) if message_id else None,
+            message_id=str(message_id),
             content_type=message_content_type,
             correlation_id=correlation_id,
             partition_key=partition_key,

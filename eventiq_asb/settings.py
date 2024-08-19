@@ -1,14 +1,13 @@
-from typing import Annotated
+from typing import Annotated, Union
 
 from eventiq.settings import UrlBrokerSettings
-from pydantic import AnyUrl, Field, UrlConstraints
+from pydantic import AnyUrl, UrlConstraints
+from typing_extensions import TypeAlias
 
-AzureServiceBusUrl = Annotated[AnyUrl, UrlConstraints(allowed_schemes=["sb", "amqp"])]
-
-
-class AzureServiceBusSettings(UrlBrokerSettings[AzureServiceBusUrl]):
-    topic_name: str = Field(alias="TOPIC_NAME")
-    url: str = Field(alias="BROKER_URL")
+ServiceBusSharedAccessKey: TypeAlias = str
+ServiceBusUrl = Annotated[AnyUrl, UrlConstraints(allowed_schemes=["sb", "amqp"])]
+ServiceBusConnectionString = Union[ServiceBusUrl, ServiceBusSharedAccessKey]
 
 
-asb_settings = AzureServiceBusSettings()
+class AzureServiceBusSettings(UrlBrokerSettings[ServiceBusConnectionString]):
+    topic_name: str
