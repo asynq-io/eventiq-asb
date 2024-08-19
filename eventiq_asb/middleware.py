@@ -40,7 +40,9 @@ class ServiceBusManagerMiddleware(Middleware):
         service: Service,
     ) -> None:
         super().__init__(service)
-        assert isinstance(self.service.broker, AzureServiceBusBroker)
+        if not isinstance(self.service.broker, AzureServiceBusBroker):
+            error = "Unsupported broker type"
+            raise TypeError(error)
         self.url = self.service.broker.url
         self.client = ServiceBusAdministrationClient.from_connection_string(self.url)
         self.topic_name = self.service.broker.topic_name
