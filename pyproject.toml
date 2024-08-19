@@ -22,7 +22,7 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
 dependencies = [
-    "eventiq>=1.1.0",
+    "eventiq>=1.1.1",
     "azure-servicebus",
     "aiohttp>3.9.0"
 ]
