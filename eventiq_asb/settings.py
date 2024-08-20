@@ -2,9 +2,8 @@ from typing import Annotated, Union
 
 from eventiq.settings import UrlBrokerSettings
 from pydantic import AnyUrl, StringConstraints, UrlConstraints
-from typing_extensions import TypeAlias
 
-ServiceBusSharedAccessKey: TypeAlias = Annotated[
+ServiceBusSharedAccessKey = Annotated[
     str,
     StringConstraints(
         strip_whitespace=True,
