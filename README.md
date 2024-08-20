@@ -19,6 +19,13 @@ Azure Service Bus broker implementation for eventiq
 pip install eventiq-asb
 ```
 
+With optional dependencies:
+
+```shell
+pip install 'eventiq-asb[aiohttp]'
+```
+
+
 ## Usage
 
 ```python

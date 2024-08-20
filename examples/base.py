@@ -1,15 +1,23 @@
 from eventiq import CloudEvent, Service
 
-from eventiq_asb import AzureServiceBusBroker, DeadLetterQueueMiddleware
+from eventiq_asb import (
+    AutoLockRenewerMiddleware,
+    AzureServiceBusBroker,
+    DeadLetterQueueMiddleware,
+    ServiceBusManagerMiddleware,
+)
 
 service = Service(
     name="example-service",
     broker=AzureServiceBusBroker(
-        topic="example-topic", url="sb://example.servicebus.windows.net/"
+        url="sb://example.servicebus.windows.net/",
+        topic_name="example-topic",
     ),
 )
 
 service.add_middleware(DeadLetterQueueMiddleware)
+service.add_middleware(AutoLockRenewerMiddleware)
+service.add_middleware(ServiceBusManagerMiddleware)
 
 
 @service.subscribe(topic="example-topic")

@@ -21,16 +21,15 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: CPython",
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
-dependencies = [
-    "eventiq>=1.1.1",
-    "azure-servicebus",
-    "aiohttp>3.9.0"
-]
+dependencies = ["eventiq>=1.1.1", "azure-servicebus"]
 
 [project.urls]
 Documentation = "https://github.com/asynq-io/eventiq-asb#readme"
 Issues = "https://github.com/asynq-io/eventiq-asb/issues"
 Source = "https://github.com/asynq-io/eventiq-asb"
+
+[project.optional-dependencies]
+aiohttp = ["aiohttp>3.9.0,<4.0"]
 
 [tool.hatch.version]
 path = "eventiq_asb/__about__.py"
@@ -105,7 +104,7 @@ ignore = [
     "PLR0913",
     "PLR2004",
     "PTH123",
-    "S108"
+    "S108",
 ]
 
 

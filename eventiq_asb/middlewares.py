@@ -4,21 +4,19 @@ from typing import TYPE_CHECKING, Any
 
 from azure.core import exceptions
 from azure.servicebus.aio import AutoLockRenewer, ServiceBusSession
-from azure.servicebus.aio.management import ServiceBusAdministrationClient
 from azure.servicebus.management import CorrelationRuleFilter
 from eventiq.middleware import Middleware
-from eventiq.types import CloudEventType
 from eventiq.utils import to_float
 
 from .broker import AzureServiceBusBroker
 
 if TYPE_CHECKING:
     from azure.servicebus import ServiceBusReceivedMessage
-    from eventiq import Consumer, Service
+    from eventiq import CloudEvent, Consumer, Service
     from eventiq.exceptions import Fail
 
 
-class AbstractServiceBusMiddleware(Middleware):
+class ServiceBusMiddleware(Middleware):
     def __init__(self, service: Service) -> None:
         super().__init__(service)
         if not isinstance(service.broker, AzureServiceBusBroker):
@@ -27,11 +25,9 @@ class AbstractServiceBusMiddleware(Middleware):
         self.broker: AzureServiceBusBroker = service.broker
 
 
-class DeadLetterQueueMiddleware(
-    AbstractServiceBusMiddleware, Middleware[CloudEventType]
-):
+class DeadLetterQueueMiddleware(ServiceBusMiddleware):
     async def after_fail_message(
-        self, *, consumer: Consumer, message: CloudEventType, exc: Fail
+        self, *, consumer: Consumer, message: CloudEvent, exc: Fail
     ) -> None:
         receiver = self.broker.get_message_receiver(message.raw)
         if not receiver:
@@ -41,9 +37,12 @@ class DeadLetterQueueMiddleware(
         await receiver.dead_letter_message(message.raw, reason=exc.reason)
 
 
-class ServiceBusManagerMiddleware(AbstractServiceBusMiddleware):
+class ServiceBusManagerMiddleware(ServiceBusMiddleware):
     def __init__(self, service: Service) -> None:
         super().__init__(service)
+        # dynamic import to avoid requiring aiohttp
+        from azure.servicebus.aio.management import ServiceBusAdministrationClient
+
         self.client = ServiceBusAdministrationClient.from_connection_string(
             self.broker.url
         )
@@ -102,7 +101,7 @@ class ServiceBusManagerMiddleware(AbstractServiceBusMiddleware):
             await self.client.close()
 
 
-class AutoLockRenewerMiddleware(AbstractServiceBusMiddleware):
+class AutoLockRenewerMiddleware(ServiceBusMiddleware):
     def __init__(self, service: Service) -> None:
         super().__init__(service)
         self._renewer: AutoLockRenewer = AutoLockRenewer()
@@ -111,13 +110,13 @@ class AutoLockRenewerMiddleware(AbstractServiceBusMiddleware):
         self,
         *,
         consumer: Consumer,
-        message: CloudEventType,
+        message: CloudEvent,
         result: Any = None,
         exc: Exception | None = None,
     ) -> None:
         max_lock_duration = (
             to_float(consumer.timeout) or self.broker.default_consumer_timeout
-        )
+        ) + 5
         receiver = self.broker.get_message_receiver(message.raw)
         if not receiver:
             self.logger.warning(
@@ -136,13 +135,15 @@ class AutoLockRenewerMiddleware(AbstractServiceBusMiddleware):
         renewable: ServiceBusSession | ServiceBusReceivedMessage,
         exc: Exception | None,
     ) -> None:
+        kwargs = {}
+        if exc:
+            kwargs["exc_info"] = exc
         self.logger.warning(
             "Lock renewal failed for message %d: %s",
             id(renewable),
             str(renewable),
+            **kwargs,
         )
-        if exc:
-            self.logger.warning("Lock renewal error:", exc_info=exc)
 
     async def after_broker_disconnect(self) -> None:
         await self._renewer.close()
