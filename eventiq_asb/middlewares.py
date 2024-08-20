@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from azure.core import exceptions
 from azure.servicebus.aio import AutoLockRenewer, ServiceBusSession
@@ -17,12 +17,16 @@ if TYPE_CHECKING:
 
 
 class ServiceBusMiddleware(Middleware):
+    error_msg = "Unsupported broker type"
+
     def __init__(self, service: Service) -> None:
-        super().__init__(service)
         if not isinstance(service.broker, AzureServiceBusBroker):
-            error = "Unsupported broker type"
-            raise TypeError(error)
-        self.broker: AzureServiceBusBroker = service.broker
+            raise TypeError(self.error_msg)
+        super().__init__(service)
+
+    @property
+    def broker(self) -> AzureServiceBusBroker:
+        return cast(AzureServiceBusBroker, self.service.broker)
 
 
 class DeadLetterQueueMiddleware(ServiceBusMiddleware):
@@ -135,14 +139,11 @@ class AutoLockRenewerMiddleware(ServiceBusMiddleware):
         renewable: ServiceBusSession | ServiceBusReceivedMessage,
         exc: Exception | None,
     ) -> None:
-        kwargs = {}
-        if exc:
-            kwargs["exc_info"] = exc
         self.logger.warning(
             "Lock renewal failed for message %d: %s",
             id(renewable),
             str(renewable),
-            **kwargs,
+            exc_info=exc,
         )
 
     async def after_broker_disconnect(self) -> None:

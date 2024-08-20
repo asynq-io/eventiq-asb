@@ -35,7 +35,15 @@ aiohttp = ["aiohttp>3.9.0,<4.0"]
 path = "eventiq_asb/__about__.py"
 
 [tool.hatch.envs.default]
-dependencies = ["pytest", "pyyaml", "pytest-cov", "ruff", "mypy", "bandit"]
+dependencies = [
+    "pytest",
+    "pyyaml",
+    "pytest-cov",
+    "ruff",
+    "mypy",
+    "bandit",
+    "aiohttp",
+]
 
 [tool.hatch.envs.default.scripts]
 test = "pytest {args:tests}"

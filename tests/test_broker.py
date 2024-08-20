@@ -1,8 +1,13 @@
 import os
 
-from eventiq import Broker
+from eventiq import Broker, Service
 
-from eventiq_asb import AzureServiceBusBroker
+from eventiq_asb import (
+    AutoLockRenewerMiddleware,
+    AzureServiceBusBroker,
+    DeadLetterQueueMiddleware,
+    ServiceBusManagerMiddleware,
+)
 
 
 def test_is_subclass():
@@ -12,9 +17,13 @@ def test_is_subclass():
 def test_settings():
     os.environ.update(
         {
-            "BROKER_URL": "sb://localhost:3333",
+            "BROKER_URL": "Endpoint=sb://test-domain.servicebus.windows.net/;SharedAccessKeyName=test-name;SharedAccessKey=test-key",
             "BROKER_TOPIC_NAME": "test_topic",
         }
     )
     broker = AzureServiceBusBroker.from_env()
+    service = Service(name="test", broker=broker)
+    service.add_middleware(DeadLetterQueueMiddleware)
+    service.add_middleware(AutoLockRenewerMiddleware)
+    service.add_middleware(ServiceBusManagerMiddleware)
     assert isinstance(broker, AzureServiceBusBroker)
