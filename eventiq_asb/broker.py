@@ -126,15 +126,20 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
         receiver = self.client.get_subscription_receiver(
             topic_name=self.topic_name, subscription_name=consumer.topic
         )
-        prefetch_count = consumer.options.get(
-            "prefetch_count", consumer.concurrency * 2
-        )
         max_wait_time = consumer.options.get("max_wait_time", 5)
         async with receiver, send_stream:
             while True:
-                received_msgs = await receiver.receive_messages(
-                    max_message_count=prefetch_count, max_wait_time=max_wait_time
+                batch = consumer.concurrency - len(
+                    send_stream._state.buffer  # noqa: SLF001
                 )
+                if batch == 0:
+                    await anyio.sleep(0.1)
+                    continue
+
+                received_msgs = await receiver.receive_messages(
+                    max_message_count=batch, max_wait_time=max_wait_time
+                )
+                self.logger.debug("Fetching %d messages", batch)
                 for msg in received_msgs:
                     self._receivers[id(msg)] = (
                         receiver  # store weak reference to receiver for ack/nack
