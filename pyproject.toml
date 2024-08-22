@@ -21,7 +21,7 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: CPython",
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
-dependencies = ["eventiq>=1.1.1", "azure-servicebus"]
+dependencies = ["eventiq>=1.1.2", "azure-servicebus"]
 
 [project.urls]
 Documentation = "https://github.com/asynq-io/eventiq-asb#readme"
