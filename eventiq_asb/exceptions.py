@@ -1,0 +1,3 @@
+
+class ReceiverFinishedException(Exception):
+    pass

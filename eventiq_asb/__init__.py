@@ -1,7 +1,8 @@
 from .__about__ import __version__
 from .broker import AzureServiceBusBroker
+from .service import ServiceASB
 from .middlewares import (
-    AutoLockRenewerMiddleware,
+    # AutoLockRenewerMiddleware,
     DeadLetterQueueMiddleware,
     ServiceBusManagerMiddleware,
 )
@@ -9,7 +10,8 @@ from .middlewares import (
 __all__ = [
     "__version__",
     "AzureServiceBusBroker",
-    "AutoLockRenewerMiddleware",
+    "ServiceASB",
+    # "AutoLockRenewerMiddleware",
     "DeadLetterQueueMiddleware",
     "ServiceBusManagerMiddleware",
 ]

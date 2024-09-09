@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
+import asyncio
 
 import anyio
 from azure.servicebus import ServiceBusMessage, ServiceBusReceivedMessage
@@ -8,11 +9,16 @@ from azure.servicebus.aio import ServiceBusClient, ServiceBusReceiver, ServiceBu
 from eventiq.broker import BulkMessage, UrlBroker
 
 from .settings import AzureServiceBusSettings
+from azure.servicebus.aio import ServiceBusSession
+from .utils import AutoLockRenewer
+from eventiq.utils import to_float
+from azure.servicebus._common.utils import (
+    get_renewable_lock_duration,
+)
+import datetime
 
 if TYPE_CHECKING:
     from datetime import datetime, timedelta
-
-    from anyio.streams.memory import MemoryObjectSendStream
     from eventiq import Consumer
     from eventiq.types import ID, DecodedMessage
 
@@ -37,6 +43,9 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
         self._publisher: ServiceBusSender | None = None
         self._receivers: dict[int, ServiceBusReceiver] = {}
         self._publisher_lock = anyio.Lock()
+        self._msg_queues: dict[str, asyncio.Queue] = {}
+        # used to send messages from worker thread to main thread
+        self._result_queues: dict[str, asyncio.Queue] = {}
 
     @property
     def client(self) -> ServiceBusClient:
@@ -49,6 +58,12 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
         if self._publisher is None:
             raise self.connection_error
         return self._publisher
+
+
+    def add_queue(self, topic: str):
+        if topic not in self._msg_queues:
+            self._msg_queues[topic] = asyncio.Queue(maxsize=1000)
+            self._result_queues[topic] = asyncio.Queue(maxsize=1000)
 
     def get_message_receiver(
         self, raw_message: ServiceBusReceivedMessage
@@ -121,16 +136,19 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
         self,
         group: str,
         consumer: Consumer,
-        send_stream: MemoryObjectSendStream[ServiceBusReceivedMessage],
     ) -> None:
         receiver = self.client.get_subscription_receiver(
             topic_name=self.topic_name, subscription_name=consumer.topic
         )
         max_wait_time = consumer.options.get("max_wait_time", 5)
-        async with receiver, send_stream:
+        max_lock_duration = (
+                to_float(consumer.timeout) or self.default_consumer_timeout
+        ) + 5
+
+        async with receiver, AutoLockRenewer(self) as lock_renewer:
             while True:
-                batch = consumer.concurrency - len(
-                    send_stream._state.buffer  # noqa: SLF001
+                batch = consumer.concurrency - (
+                    self._msg_queues[consumer.topic].qsize()  # noqa: SLF001
                 )
                 if batch == 0:
                     await anyio.sleep(0.1)
@@ -139,12 +157,29 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
                 received_msgs = await receiver.receive_messages(
                     max_message_count=batch, max_wait_time=max_wait_time
                 )
-                self.logger.debug("Fetching %d messages", batch)
                 for msg in received_msgs:
+                    lock_renewer.register(
+                        receiver=receiver,
+                        renewable=msg,
+                        max_lock_renewal_duration=max_lock_duration,
+                        on_lock_renew_failure=self._on_lock_renew_failure,
+                    )
                     self._receivers[id(msg)] = (
                         receiver  # store weak reference to receiver for ack/nack
                     )
-                    await send_stream.send(msg)
+                    await self._msg_queues[consumer.topic].put(msg)
+
+    async def _on_lock_renew_failure(
+        self,
+        renewable: ServiceBusSession | ServiceBusReceivedMessage,
+        exc: Exception | None,
+    ) -> None:
+        self.logger.warning(
+            "Lock renewal failed for message %d: %s",
+            id(renewable),
+            str(renewable),
+            exc_info=exc,
+        )
 
     async def ack(self, raw_message: ServiceBusReceivedMessage) -> None:
         receiver = self._receivers.pop(
@@ -152,6 +187,7 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
         )  # retrieve receiver reference for given message
         # check if raw message is already settled else error is raised - private method
         if receiver and not raw_message._settled:  # noqa: SLF001
+            # set message as completed, and remove it from queue
             await receiver.complete_message(raw_message)
         else:
             self.logger.warning(
@@ -167,6 +203,7 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
             id(raw_message), None
         )  # retrieve receiver reference for given message
         if receiver and not raw_message._settled:  # noqa: SLF001
+            # put message back to queue
             await receiver.abandon_message(raw_message)
         else:
             self.logger.warning(
