@@ -226,5 +226,5 @@ class ReceiverMiddleware(ServiceBusMiddleware):
             "Thread Error occurred in thread: %r. Error type: %s",
             exc.thread,
             exc.exc_type,
-            exc_info=exc.exc_traceback,
+            exc_info=exc.exc_value,
         )
