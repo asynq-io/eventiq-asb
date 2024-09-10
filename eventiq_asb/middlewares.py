@@ -9,7 +9,6 @@ from azure.core import exceptions
 from azure.servicebus.aio import (
     AutoLockRenewer,
     ServiceBusClient,
-    ServiceBusReceiver,
     ServiceBusSession,
 )
 from azure.servicebus.management import CorrelationRuleFilter
@@ -35,6 +34,18 @@ class ServiceBusMiddleware(Middleware):
     @property
     def broker(self) -> AzureServiceBusBroker:
         return cast(AzureServiceBusBroker, self.service.broker)
+
+
+class DeadLetterQueueMiddleware(ServiceBusMiddleware):
+    async def after_fail_message(
+        self, *, consumer: Consumer, message: CloudEvent, exc: Fail
+    ) -> None:
+        receiver = self.broker.get_receiver(message.raw)
+        if not receiver:
+            self.logger.warning("Message receiver not found for message %s", message.id)
+            return
+
+        await receiver.dead_letter_message(message.raw, reason=exc.reason)
 
 
 class ServiceBusManagerMiddleware(ServiceBusMiddleware):
@@ -104,7 +115,6 @@ class ServiceBusManagerMiddleware(ServiceBusMiddleware):
 class ReceiverMiddleware(ServiceBusMiddleware):
     def __init__(self, service: Service) -> None:
         super().__init__(service)
-        self._receivers: dict[int, ServiceBusReceiver] = {}
         self._receiver_consumers_to_start: set[Consumer] = set()
 
     async def after_broker_connect(self) -> None:
@@ -116,15 +126,6 @@ class ReceiverMiddleware(ServiceBusMiddleware):
         Separate receiver in dedicated thread is required to start before starting the consumer
         """
         self._receiver_consumers_to_start.add(consumer)
-
-    async def after_fail_message(
-        self, *, consumer: Consumer, message: CloudEvent, exc: Fail
-    ) -> None:
-        receiver = self._receivers.pop(id(message.raw), None)
-        if not receiver:
-            self.logger.warning("Message receiver not found for message %s", message.id)
-            return
-        await receiver.dead_letter_message(message.raw, reason=exc.reason)
 
     def _run(self) -> None:
         asyncio.run(self._run_receiver_in_thread())
@@ -177,9 +178,7 @@ class ReceiverMiddleware(ServiceBusMiddleware):
                         msg,
                         max_lock_renewal_duration=max_lock_renewal_duration,
                     )
-                    self._receivers[id(msg)] = (
-                        receiver  # store weak reference to receiver for ack/nack
-                    )
+                    self.broker.set_receiver(receiver=receiver, raw_message=msg)
                 for msg in received_msgs:
                     await queue.put(msg)
 
@@ -196,7 +195,7 @@ class ReceiverMiddleware(ServiceBusMiddleware):
             await method(raw_message)
 
     async def ack(self, raw_message: ServiceBusReceivedMessage) -> None:
-        receiver = self._receivers.pop(id(raw_message), None)
+        receiver = self.broker.pop_receiver(raw_message)
         # retrieve receiver reference for given message
         # check if raw message is already settled else error is raised - private method
         if receiver and not raw_message._settled:  # noqa: SLF001
@@ -209,7 +208,7 @@ class ReceiverMiddleware(ServiceBusMiddleware):
             )
 
     async def nack(self, raw_message: ServiceBusReceivedMessage) -> None:
-        receiver = self._receivers.pop(id(raw_message), None)
+        receiver = self.broker.pop_receiver(raw_message)
         # retrieve receiver reference for given message
         # check if raw message is already settled else error is raised - private method
         if receiver and not raw_message._settled:  # noqa: SLF001

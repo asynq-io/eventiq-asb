@@ -55,10 +55,20 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
             raise self.connection_error
         return self._publisher
 
-    def get_message_receiver(
+    def get_receiver(
         self, raw_message: ServiceBusReceivedMessage
     ) -> ServiceBusReceiver | None:
         return self._receivers.get(id(raw_message))
+
+    def pop_receiver(
+        self, raw_message: ServiceBusReceivedMessage
+    ) -> ServiceBusReceiver | None:
+        return self._receivers.pop(id(raw_message), None)
+
+    def set_receiver(
+        self, receiver: ServiceBusReceiver, raw_message: ServiceBusReceivedMessage
+    ) -> None:
+        self._receivers[id(raw_message)] = receiver
 
     @staticmethod
     def decode_message(raw_message: ServiceBusReceivedMessage) -> DecodedMessage:
