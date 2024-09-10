@@ -163,8 +163,13 @@ class ReceiverMiddleware(ServiceBusMiddleware):
 
                 received_msgs = await receiver.receive_messages(max_message_count=batch)
                 self.logger.debug("Fetching %d messages", len(received_msgs))
-                max_lock_renewal_duration = to_float(
-                    consumer_instance.concurrency * consumer_instance.timeout * 3
+                max_lock_renewal_duration = (
+                    (
+                        to_float(consumer_instance.timeout)
+                        or self.broker.default_consumer_timeout
+                    )
+                    * consumer_instance.concurrency
+                    * 3
                 )  # just to be safe...
                 for msg in received_msgs:
                     renewer.register(
