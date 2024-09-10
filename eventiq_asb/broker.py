@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+from collections import defaultdict
 from typing import TYPE_CHECKING, Any
 
 import anyio
@@ -37,6 +39,9 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
         self._publisher: ServiceBusSender | None = None
         self._receivers: dict[int, ServiceBusReceiver] = {}
         self._publisher_lock = anyio.Lock()
+
+        self.msgs_queues: dict[str, asyncio.Queue] = defaultdict(asyncio.Queue)
+        self.ack_nack_queue: asyncio.Queue = asyncio.Queue()
 
     @property
     def client(self) -> ServiceBusClient:
@@ -123,57 +128,28 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
         consumer: Consumer,
         send_stream: MemoryObjectSendStream[ServiceBusReceivedMessage],
     ) -> None:
-        receiver = self.client.get_subscription_receiver(
-            topic_name=self.topic_name, subscription_name=consumer.topic
-        )
-        max_wait_time = consumer.options.get("max_wait_time", 5)
-        async with receiver, send_stream:
+        async with send_stream:
             while True:
-                batch = consumer.concurrency - len(
-                    send_stream._state.buffer  # noqa: SLF001
-                )
-                if batch == 0:
+                if self.msgs_queues[consumer.topic].empty():
                     await anyio.sleep(0.1)
                     continue
-
-                received_msgs = await receiver.receive_messages(
-                    max_message_count=batch, max_wait_time=max_wait_time
-                )
-                self.logger.debug("Fetching %d messages", batch)
-                for msg in received_msgs:
-                    self._receivers[id(msg)] = (
-                        receiver  # store weak reference to receiver for ack/nack
-                    )
-                    await send_stream.send(msg)
+                raw_message = await self.msgs_queues[consumer.topic].get()
+                await send_stream.send(raw_message)
 
     async def ack(self, raw_message: ServiceBusReceivedMessage) -> None:
-        receiver = self._receivers.pop(
-            id(raw_message), None
-        )  # retrieve receiver reference for given message
-        # check if raw message is already settled else error is raised - private method
-        if receiver and not raw_message._settled:  # noqa: SLF001
-            await receiver.complete_message(raw_message)
-        else:
-            self.logger.warning(
-                "Cannot ack message %d: %s, receiver reference is missing",
-                id(raw_message),
-                str(raw_message),
-            )
+        self.logger.debug(
+            "Message with id %s sent to ack queue to Receiver Instance", id(raw_message)
+        )
+        await self.ack_nack_queue.put(("ack", raw_message))
 
     async def nack(
         self, raw_message: ServiceBusReceivedMessage, delay: int | None = None
     ) -> None:
-        receiver = self._receivers.pop(
-            id(raw_message), None
-        )  # retrieve receiver reference for given message
-        if receiver and not raw_message._settled:  # noqa: SLF001
-            await receiver.abandon_message(raw_message)
-        else:
-            self.logger.warning(
-                "Cannot nack message %d: %s, receiver reference is missing",
-                id(raw_message),
-                str(raw_message),
-            )
+        self.logger.debug(
+            "Message with id %s sent to nack queue to Receiver Instance",
+            id(raw_message),
+        )
+        await self.ack_nack_queue.put(("nack", raw_message))
 
     @staticmethod
     def _build_message(

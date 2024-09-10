@@ -3,9 +3,8 @@ import os
 from eventiq import Broker, Service
 
 from eventiq_asb import (
-    AutoLockRenewerMiddleware,
     AzureServiceBusBroker,
-    DeadLetterQueueMiddleware,
+    ReceiverMiddleware,
     ServiceBusManagerMiddleware,
 )
 
@@ -23,7 +22,6 @@ def test_settings():
     )
     broker = AzureServiceBusBroker.from_env()
     service = Service(name="test", broker=broker)
-    service.add_middleware(DeadLetterQueueMiddleware)
-    service.add_middleware(AutoLockRenewerMiddleware)
     service.add_middleware(ServiceBusManagerMiddleware)
+    service.add_middleware(ReceiverMiddleware)
     assert isinstance(broker, AzureServiceBusBroker)
