@@ -36,18 +36,6 @@ class ServiceBusMiddleware(Middleware):
         return cast(AzureServiceBusBroker, self.service.broker)
 
 
-class DeadLetterQueueMiddleware(ServiceBusMiddleware):
-    async def after_fail_message(
-        self, *, consumer: Consumer, message: CloudEvent, exc: Fail
-    ) -> None:
-        receiver = self.broker.get_receiver(message.raw)
-        if not receiver:
-            self.logger.warning("Message receiver not found for message %s", message.id)
-            return
-
-        await receiver.dead_letter_message(message.raw, reason=exc.reason)
-
-
 class ServiceBusManagerMiddleware(ServiceBusMiddleware):
     def __init__(self, service: Service) -> None:
         super().__init__(service)
@@ -231,3 +219,13 @@ class ReceiverMiddleware(ServiceBusMiddleware):
             str(renewable),
             exc_info=exc,
         )
+
+    async def after_fail_message(
+        self, *, consumer: Consumer, message: CloudEvent, exc: Fail
+    ) -> None:
+        receiver = self.broker.get_receiver(message.raw)
+        if not receiver:
+            self.logger.warning("Message receiver not found for message %s", message.id)
+            return
+
+        await receiver.dead_letter_message(message.raw, reason=exc.reason)
