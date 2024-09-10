@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from threading import Thread
+import threading
 from typing import TYPE_CHECKING, cast
 
 import anyio
@@ -19,8 +19,7 @@ from .broker import AzureServiceBusBroker
 
 if TYPE_CHECKING:
     from azure.servicebus import ServiceBusReceivedMessage
-    from eventiq import CloudEvent, Consumer, Service
-    from eventiq.exceptions import Fail
+    from eventiq import Consumer, Service
 
 
 class ServiceBusMiddleware(Middleware):
@@ -106,7 +105,8 @@ class ReceiverMiddleware(ServiceBusMiddleware):
         self._receiver_consumers_to_start: set[Consumer] = set()
 
     async def after_broker_connect(self) -> None:
-        thread = Thread(target=self._run)
+        threading.excepthook = self.stop_client
+        thread = threading.Thread(target=self._run)
         thread.start()
 
     async def before_consumer_start(self, *, consumer: Consumer) -> None:
@@ -220,12 +220,11 @@ class ReceiverMiddleware(ServiceBusMiddleware):
             exc_info=exc,
         )
 
-    async def after_fail_message(
-        self, *, consumer: Consumer, message: CloudEvent, exc: Fail
-    ) -> None:
-        receiver = self.broker.get_receiver(message.raw)
-        if not receiver:
-            self.logger.warning("Message receiver not found for message %s", message.id)
-            return
-
-        await receiver.dead_letter_message(message.raw, reason=exc.reason)
+    def stop_client(self, exc: threading.ExceptHookArgs) -> None:
+        asyncio.run(self.broker.client.close())
+        self.logger.error(
+            "Thread Error occurred in thread: %r. Error type: %s",
+            exc.thread,
+            exc.exc_type,
+            exc_info=exc.exc_traceback,
+        )
