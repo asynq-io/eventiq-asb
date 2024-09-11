@@ -19,7 +19,8 @@ from .broker import AzureServiceBusBroker
 
 if TYPE_CHECKING:
     from azure.servicebus import ServiceBusReceivedMessage
-    from eventiq import Consumer, Service
+    from eventiq import CloudEvent, Consumer, Service
+    from eventiq.exceptions import Fail
 
 
 class ServiceBusMiddleware(Middleware):
@@ -228,3 +229,25 @@ class ReceiverMiddleware(ServiceBusMiddleware):
             exc.exc_type,
             exc_info=exc.exc_value,
         )
+
+    async def after_fail_message(
+        self, *, consumer: Consumer, message: CloudEvent, exc: Fail
+    ) -> None:
+        await self.broker.ack_nack_queue.put(("fail", message.raw))
+        self.logger.error(
+            "Failed message: %r for consumer: %s",
+            message,
+            consumer.topic,
+            exc_info=exc,
+        )
+
+    async def fail(self, raw_message: ServiceBusReceivedMessage) -> None:
+        receiver = self.broker.get_receiver(raw_message)
+        if receiver and not raw_message._settled:  # noqa: SLF001
+            await receiver.dead_letter_message(raw_message)
+        else:
+            self.logger.warning(
+                "Cannot move to Dead Letter Queue. Message%d: %s, receiver reference is missing",
+                id(raw_message),
+                str(raw_message),
+            )
