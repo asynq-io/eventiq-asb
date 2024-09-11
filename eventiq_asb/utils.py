@@ -79,14 +79,8 @@ class AutoLockRenewer:
                 "not using RECEIVE_AND_DELETE receive mode, and not returned from Peek)"
             )
 
-        # This is a heuristic to compensate if it appears the user has a lock duration less than our base renew period
-        time_until_expiry = get_renewable_lock_duration(renewable)
-
-        # renew at least once every 10 seconds
-        renew_period = max(time_until_expiry.seconds * SHORT_RENEW_SCALING_FACTOR, time_until_expiry.seconds - 10)
-
         self._tg.start_soon(
-            self._auto_lock_renew, receiver, renewable, max_lock_renewal_duration, renew_period, on_lock_renew_failure
+            self._auto_lock_renew, receiver, renewable, max_lock_renewal_duration, on_lock_renew_failure
         )
 
     def _is_renewable(
@@ -114,7 +108,6 @@ class AutoLockRenewer:
         receiver: ServiceBusReceiver,
         renewable: Renewable,
         max_lock_renewal_duration: float,
-        renew_period: float,
         on_lock_renew_failure: Optional[AsyncLockRenewFailureCallback] = None,
     ) -> None:
         # pylint: disable=protected-access
@@ -128,17 +121,16 @@ class AutoLockRenewer:
             with anyio.fail_after(max_lock_renewal_duration, shield=True):
                 while self._is_renewable(renewable):
 
-                    if (renewable.locked_until_utc - utc_now()) <= datetime.timedelta(
-                        seconds=renew_period
-                    ):
-                        try:
-                            # Renewable is a session
-                            await renewable.renew_lock()  # type: ignore
-                        except AttributeError:
-                            # Renewable is a message
-                            await receiver.renew_message_lock(renewable)  # type: ignore
+                    try:
+                        # Renewable is a session
+                        await renewable.renew_lock()  # type: ignore
+                    except AttributeError:
+                        # Renewable is a message
+                        await receiver.renew_message_lock(renewable)  # type: ignore
 
-                    sleep_time = max((renewable.locked_until_utc - utc_now()).seconds - renew_period, 0.1)
+                    # renew at most once every 10 seconds, at least 10 seconds before expiry
+                    sleep_time = min(max(get_renewable_lock_duration(renewable).seconds - 10, 0), 10)
+
                     await anyio.sleep(sleep_time)
 
             lock_expired = renewable._lock_expired
