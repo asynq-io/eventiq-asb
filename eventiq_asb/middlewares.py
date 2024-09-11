@@ -1,17 +1,19 @@
 from __future__ import annotations
 
+import asyncio
+from datetime import timedelta
 from typing import TYPE_CHECKING, Any, cast
 
 from azure.core import exceptions
-from azure.servicebus.aio import AutoLockRenewer, ServiceBusSession
 from azure.servicebus.management import CorrelationRuleFilter
 from eventiq.middleware import Middleware
-from eventiq.utils import to_float
+from eventiq.utils import to_float, utc_now
 
 from .broker import AzureServiceBusBroker
 
 if TYPE_CHECKING:
     from azure.servicebus import ServiceBusReceivedMessage
+    from azure.servicebus.aio import ServiceBusReceiver
     from eventiq import CloudEvent, Consumer, Service
     from eventiq.exceptions import Fail
 
@@ -108,7 +110,7 @@ class ServiceBusManagerMiddleware(ServiceBusMiddleware):
 class AutoLockRenewerMiddleware(ServiceBusMiddleware):
     def __init__(self, service: Service) -> None:
         super().__init__(service)
-        self._renewer: AutoLockRenewer = AutoLockRenewer()
+        self._tasks: dict[int, asyncio.Task] = {}
 
     async def before_process_message(
         self,
@@ -127,24 +129,58 @@ class AutoLockRenewerMiddleware(ServiceBusMiddleware):
                 "AutoLockRemover not found receiver for message %s", message.id
             )
             return
-        self._renewer.register(
-            receiver=receiver,
-            renewable=message.raw,
-            max_lock_renewal_duration=max_lock_duration,
-            on_lock_renew_failure=self._on_lock_renew_failure,
+        task = asyncio.create_task(
+            self.auto_lock_renewer(receiver, message.raw, timeout=max_lock_duration)
         )
+        self._tasks[id(message.raw)] = task
 
-    async def _on_lock_renew_failure(
+    async def _cancel_task(self, message: ServiceBusReceivedMessage) -> None:
+        task = self._tasks.pop(id(message), None)
+        if task:
+            task.cancel()
+
+    async def before_ack(self, *, consumer: Consumer, raw_message: Any) -> None:
+        await self._cancel_task(raw_message)
+
+    async def before_nack(self, *, consumer: Consumer, raw_message: Any) -> None:
+        await self._cancel_task(raw_message)
+
+    async def before_broker_disconnect(self) -> None:
+        for task in self._tasks.values():
+            task.cancel()
+
+    async def auto_lock_renewer(
         self,
-        renewable: ServiceBusSession | ServiceBusReceivedMessage,
-        exc: Exception | None,
+        receiver: ServiceBusReceiver,
+        message: ServiceBusReceivedMessage,
+        timeout: float,
     ) -> None:
-        self.logger.warning(
-            "Lock renewal failed for message %d: %s",
-            id(renewable),
-            str(renewable),
-            exc_info=exc,
-        )
+        deadline = utc_now() + timedelta(seconds=timeout)
 
-    async def after_broker_disconnect(self) -> None:
-        await self._renewer.close()
+        while utc_now() < deadline:
+            if message.locked_until_utc:
+                self.logger.debug(
+                    "Message is locked until: %s", message.locked_until_utc
+                )
+                left = (utc_now() - message.locked_until_utc).total_seconds() - 5
+                if left > 0:
+                    self.logger.debug("Waiting for %d", left)
+                    await asyncio.sleep(left)
+            if message._settled:  # noqa: SLF001
+                self.logger.debug("Message %d is settled", id(message))
+                return
+
+            if message._lock_expired:  # noqa: SLF001
+                self.logger.warning("Lock expired for message %d", id(message))
+                return
+            try:
+                self.logger.debug("Renewing lock for message %d", id(message))
+                expires_at = await receiver.renew_message_lock(message)
+                self.logger.debug(
+                    "Renewed lock for message %d to %s", id(message), expires_at
+                )
+            except Exception as e:
+                self.logger.warning(
+                    "Error renewing lock for message %d", id(message), exc_info=e
+                )
+                await asyncio.sleep(5)
