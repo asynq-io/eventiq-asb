@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from collections import defaultdict
 from typing import TYPE_CHECKING, Any
 
 import anyio
@@ -42,7 +41,7 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
         self._client: ServiceBusClient | None = None
         self._publisher: ServiceBusSender | None = None
         self._publisher_lock = anyio.Lock()
-        self.msgs_queues: dict[str, asyncio.Queue] = defaultdict(asyncio.Queue)
+        self.msgs_queues: dict[str, asyncio.Queue] = {}
         self.ack_nack_queue: asyncio.Queue = asyncio.Queue()
 
     @property
