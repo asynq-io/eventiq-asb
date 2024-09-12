@@ -8,7 +8,6 @@ import anyio
 from azure.core import exceptions
 from azure.servicebus.aio import (
     AutoLockRenewer,
-    ServiceBusClient,
     ServiceBusReceiver,
     ServiceBusSession,
 )
@@ -105,7 +104,6 @@ class ReceiverMiddleware(ServiceBusMiddleware):
     def __init__(self, service: Service) -> None:
         super().__init__(service)
         self._receiver_consumers_to_start: set[Consumer] = set()
-        self._client_in_thread: ServiceBusClient | None = None
         self._receivers: dict[int, ServiceBusReceiver] = {}
 
     def get_receiver(
@@ -138,9 +136,6 @@ class ReceiverMiddleware(ServiceBusMiddleware):
         asyncio.run(self._run_receiver_in_thread())
 
     async def _run_receiver_in_thread(self) -> None:
-        self._client_in_thread = ServiceBusClient.from_connection_string(
-            self.broker.url
-        )
         async with AutoLockRenewer() as renewer, anyio.create_task_group() as tg:
             tg.start_soon(self._results_handler)
             while True:
