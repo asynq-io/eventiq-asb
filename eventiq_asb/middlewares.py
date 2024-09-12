@@ -9,6 +9,7 @@ from azure.core import exceptions
 from azure.servicebus.aio import (
     AutoLockRenewer,
     ServiceBusClient,
+    ServiceBusReceiver,
     ServiceBusSession,
 )
 from azure.servicebus.management import CorrelationRuleFilter
@@ -104,6 +105,23 @@ class ReceiverMiddleware(ServiceBusMiddleware):
     def __init__(self, service: Service) -> None:
         super().__init__(service)
         self._receiver_consumers_to_start: set[Consumer] = set()
+        self._client_in_thread: ServiceBusClient | None = None
+        self._receivers: dict[int, ServiceBusReceiver] = {}
+
+    def get_receiver(
+        self, raw_message: ServiceBusReceivedMessage
+    ) -> ServiceBusReceiver | None:
+        return self._receivers.get(id(raw_message))
+
+    def pop_receiver(
+        self, raw_message: ServiceBusReceivedMessage
+    ) -> ServiceBusReceiver | None:
+        return self._receivers.pop(id(raw_message), None)
+
+    def set_receiver(
+        self, receiver: ServiceBusReceiver, raw_message: ServiceBusReceivedMessage
+    ) -> None:
+        self._receivers[id(raw_message)] = receiver
 
     async def after_broker_connect(self) -> None:
         threading.excepthook = self.stop_client
@@ -120,6 +138,9 @@ class ReceiverMiddleware(ServiceBusMiddleware):
         asyncio.run(self._run_receiver_in_thread())
 
     async def _run_receiver_in_thread(self) -> None:
+        self._client_in_thread = ServiceBusClient.from_connection_string(
+            self.broker.url
+        )
         async with AutoLockRenewer() as renewer, anyio.create_task_group() as tg:
             tg.start_soon(self._results_handler)
             while True:
@@ -137,13 +158,10 @@ class ReceiverMiddleware(ServiceBusMiddleware):
         and register them to AutoLockRenewer before sending them to further processing
         """
         self.logger.info("Receiver for %s started", consumer_instance.topic)
-        async with (
-            ServiceBusClient.from_connection_string(self.broker.url) as client,
-            client.get_subscription_receiver(
-                topic_name=self.broker.topic_name,
-                subscription_name=consumer_instance.topic,
-            ) as receiver,
-        ):
+        async with self.broker.client.get_subscription_receiver(
+            topic_name=self.broker.topic_name,
+            subscription_name=consumer_instance.topic,
+        ) as receiver:
             while True:
                 queue = self.broker.msgs_queues[consumer_instance.topic]
                 batch = consumer_instance.concurrency - queue.qsize()
@@ -167,7 +185,7 @@ class ReceiverMiddleware(ServiceBusMiddleware):
                         msg,
                         max_lock_renewal_duration=max_lock_renewal_duration,
                     )
-                    self.broker.set_receiver(receiver=receiver, raw_message=msg)
+                    self.set_receiver(receiver=receiver, raw_message=msg)
                 for msg in received_msgs:
                     await queue.put(msg)
 
@@ -184,7 +202,7 @@ class ReceiverMiddleware(ServiceBusMiddleware):
             await method(raw_message)
 
     async def ack(self, raw_message: ServiceBusReceivedMessage) -> None:
-        receiver = self.broker.pop_receiver(raw_message)
+        receiver = self.pop_receiver(raw_message)
         # retrieve receiver reference for given message
         # check if raw message is already settled else error is raised - private method
         if receiver and not raw_message._settled:  # noqa: SLF001
@@ -197,7 +215,7 @@ class ReceiverMiddleware(ServiceBusMiddleware):
             )
 
     async def nack(self, raw_message: ServiceBusReceivedMessage) -> None:
-        receiver = self.broker.pop_receiver(raw_message)
+        receiver = self.pop_receiver(raw_message)
         # retrieve receiver reference for given message
         # check if raw message is already settled else error is raised - private method
         if receiver and not raw_message._settled:  # noqa: SLF001
@@ -242,7 +260,7 @@ class ReceiverMiddleware(ServiceBusMiddleware):
         )
 
     async def fail(self, raw_message: ServiceBusReceivedMessage) -> None:
-        receiver = self.broker.get_receiver(raw_message)
+        receiver = self.get_receiver(raw_message)
         if receiver and not raw_message._settled:  # noqa: SLF001
             await receiver.dead_letter_message(raw_message)
         else:

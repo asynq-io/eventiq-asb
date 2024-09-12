@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 import anyio
 from azure.servicebus import ServiceBusMessage, ServiceBusReceivedMessage
-from azure.servicebus.aio import ServiceBusClient, ServiceBusReceiver, ServiceBusSender
+from azure.servicebus.aio import ServiceBusClient, ServiceBusSender
 from eventiq.broker import BulkMessage, UrlBroker
 
 from .settings import AzureServiceBusSettings
@@ -37,9 +37,7 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
         self.batch_max_size = batch_max_size
         self._client: ServiceBusClient | None = None
         self._publisher: ServiceBusSender | None = None
-        self._receivers: dict[int, ServiceBusReceiver] = {}
         self._publisher_lock = anyio.Lock()
-
         self.msgs_queues: dict[str, asyncio.Queue] = defaultdict(asyncio.Queue)
         self.ack_nack_queue: asyncio.Queue = asyncio.Queue()
 
@@ -54,21 +52,6 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
         if self._publisher is None:
             raise self.connection_error
         return self._publisher
-
-    def get_receiver(
-        self, raw_message: ServiceBusReceivedMessage
-    ) -> ServiceBusReceiver | None:
-        return self._receivers.get(id(raw_message))
-
-    def pop_receiver(
-        self, raw_message: ServiceBusReceivedMessage
-    ) -> ServiceBusReceiver | None:
-        return self._receivers.pop(id(raw_message), None)
-
-    def set_receiver(
-        self, receiver: ServiceBusReceiver, raw_message: ServiceBusReceivedMessage
-    ) -> None:
-        self._receivers[id(raw_message)] = receiver
 
     @staticmethod
     def decode_message(raw_message: ServiceBusReceivedMessage) -> DecodedMessage:
