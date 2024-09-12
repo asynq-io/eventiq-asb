@@ -125,6 +125,7 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
         consumer: Consumer,
         send_stream: MemoryObjectSendStream[ServiceBusReceivedMessage],
     ) -> None:
+        self.msgs_queues[consumer.topic] = asyncio.Queue(maxsize=consumer.concurrency)
         async with send_stream:
             while True:
                 raw_message = await self.msgs_queues[consumer.topic].get()
