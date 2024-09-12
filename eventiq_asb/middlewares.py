@@ -126,7 +126,7 @@ class ReceiverMiddleware(ServiceBusMiddleware):
         thread = threading.Thread(target=self._run)
         thread.start()
 
-    async def before_consumer_start(self, *, consumer: Consumer) -> None:
+    async def after_consumer_start(self, *, consumer: Consumer) -> None:
         """
         Separate receiver in dedicated thread is required to start before starting the consumer
         """
