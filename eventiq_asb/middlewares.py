@@ -189,9 +189,6 @@ class ReceiverMiddleware(ServiceBusMiddleware):
         Method called in background thread as task for result such as nack/ack handling
         """
         while True:
-            if self.broker.ack_nack_queue.empty():
-                await anyio.sleep(0.1)
-                continue
             action, raw_message = await self.broker.ack_nack_queue.get()
             method = getattr(self, action)
             await method(raw_message)

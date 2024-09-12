@@ -4,7 +4,6 @@ from eventiq import Broker, Service
 
 from eventiq_asb import (
     AzureServiceBusBroker,
-    ReceiverMiddleware,
     ServiceBusManagerMiddleware,
 )
 
@@ -23,5 +22,4 @@ def test_settings():
     broker = AzureServiceBusBroker.from_env()
     service = Service(name="test", broker=broker)
     service.add_middleware(ServiceBusManagerMiddleware)
-    service.add_middleware(ReceiverMiddleware)
     assert isinstance(broker, AzureServiceBusBroker)

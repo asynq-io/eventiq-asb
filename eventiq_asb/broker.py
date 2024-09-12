@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 import anyio
 from azure.servicebus import ServiceBusMessage, ServiceBusReceivedMessage
 from azure.servicebus.aio import ServiceBusClient, ServiceBusSender
+from eventiq import Service
 from eventiq.broker import BulkMessage, UrlBroker
 
 from .settings import AzureServiceBusSettings
@@ -33,6 +34,9 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
         **extra: Any,
     ) -> None:
         super().__init__(**extra)
+        from .middlewares import ReceiverMiddleware
+
+        Service.default_middlewares.append(ReceiverMiddleware)
         self.topic_name = topic_name
         self.batch_max_size = batch_max_size
         self._client: ServiceBusClient | None = None
@@ -123,9 +127,6 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
     ) -> None:
         async with send_stream:
             while True:
-                if self.msgs_queues[consumer.topic].empty():
-                    await anyio.sleep(0.1)
-                    continue
                 raw_message = await self.msgs_queues[consumer.topic].get()
                 await send_stream.send(raw_message)
 
