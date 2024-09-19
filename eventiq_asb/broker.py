@@ -65,7 +65,7 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
         return {}
 
     def get_num_delivered(self, raw_message: ServiceBusReceivedMessage) -> int | None:
-        if raw_message.delivery_count:
+        if isinstance(raw_message.delivery_count, int):
             return raw_message.delivery_count + 1
         return None
 
