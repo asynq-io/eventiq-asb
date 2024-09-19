@@ -65,7 +65,9 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
         return {}
 
     def get_num_delivered(self, raw_message: ServiceBusReceivedMessage) -> int | None:
-        return raw_message.delivery_count
+        if raw_message.delivery_count:
+            return raw_message.delivery_count + 1
+        return None
 
     @property
     def is_connected(self) -> bool:
@@ -86,9 +88,9 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
             await self._client.close()
 
     def should_nack(self, raw_message: ServiceBusReceivedMessage) -> bool:
-        return (
-            raw_message.delivery_count is not None and raw_message.delivery_count <= 3
-        )
+        if delivery_count := self.get_num_delivered(raw_message):
+            return delivery_count <= 3
+        return False
 
     async def publish(
         self,
