@@ -129,6 +129,13 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
         self.msgs_queues[consumer.topic] = asyncio.Queue(maxsize=consumer.concurrency)
         async with send_stream:
             while True:
+                # typical case when asyncio.Queue has delay when fetching messages in while loop
+                batch = self.msgs_queues[consumer.topic].qsize() - len(
+                    send_stream._state.buffer  # noqa: SLF001
+                )
+                if batch == 0:
+                    await anyio.sleep(0.1)
+                    continue
                 raw_message = await self.msgs_queues[consumer.topic].get()
                 await send_stream.send(raw_message)
 
