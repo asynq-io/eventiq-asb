@@ -9,7 +9,7 @@ from azure.servicebus.aio import ServiceBusClient, ServiceBusSender
 from eventiq import Service
 from eventiq.broker import BulkMessage, UrlBroker
 
-from eventiq_asb.settings import AzureServiceBusSettings
+from .settings import AzureServiceBusSettings
 
 if TYPE_CHECKING:
     from datetime import datetime, timedelta
