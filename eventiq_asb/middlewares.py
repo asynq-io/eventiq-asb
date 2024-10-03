@@ -232,7 +232,7 @@ class ReceiverMiddleware(ServiceBusMiddleware):
         )
 
     def stop_client(self, exc: threading.ExceptHookArgs) -> None:
-        asyncio.run(self.broker.client.close())
+        asyncio.run(self.broker.disconnect())
         self.logger.error(
             "Thread Error occurred in thread: %r. Error type: %s",
             exc.thread,

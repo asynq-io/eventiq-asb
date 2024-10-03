@@ -71,8 +71,10 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
 
     @property
     def is_connected(self) -> bool:
-        if self._publisher:
+        if self._publisher and self._client:
             self._publisher._check_live()  # noqa: SLF001
+            for handler in self._client._handlers:  # noqa: SLF001
+                handler._check_live()  # noqa: SLF001
             return True
         return False
 
@@ -82,8 +84,6 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
             self._publisher = self._client.get_topic_sender(self.topic_name)
 
     async def disconnect(self) -> None:
-        if self._publisher:
-            await self._publisher.close()
         if self._client:
             await self._client.close()
 
