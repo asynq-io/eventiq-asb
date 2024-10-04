@@ -9,6 +9,7 @@ from azure.servicebus.aio import ServiceBusClient, ServiceBusSender
 from eventiq import Service
 from eventiq.broker import BulkMessage, UrlBroker
 
+from .results import Ack, Nack
 from .settings import AzureServiceBusSettings
 
 if TYPE_CHECKING:
@@ -143,7 +144,7 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
         self.logger.debug(
             "Message with id %s sent to ack queue to Receiver Instance", id(raw_message)
         )
-        await self.ack_nack_queue.put(("ack", raw_message))
+        await self.ack_nack_queue.put(Ack(message=raw_message))
 
     async def nack(
         self, raw_message: ServiceBusReceivedMessage, delay: int | None = None
@@ -152,7 +153,7 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
             "Message with id %s sent to nack queue to Receiver Instance",
             id(raw_message),
         )
-        await self.ack_nack_queue.put(("nack", raw_message))
+        await self.ack_nack_queue.put(Nack(message=raw_message))
 
     @staticmethod
     def _build_message(
