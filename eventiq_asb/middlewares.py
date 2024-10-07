@@ -2,20 +2,19 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from dataclasses import asdict
 from typing import TYPE_CHECKING, cast
 
 import anyio
 from azure.core import exceptions
-from azure.servicebus.aio import (
-    AutoLockRenewer,
-    ServiceBusReceiver,
-    ServiceBusSession,
-)
+from azure.servicebus.aio import AutoLockRenewer, ServiceBusReceiver
 from azure.servicebus.management import CorrelationRuleFilter
 from eventiq.middleware import Middleware
 from eventiq.utils import to_float
 
 from .broker import AzureServiceBusBroker
+from .results import Fail as FailResult
+from .results import Result
 
 if TYPE_CHECKING:
     from azure.servicebus import ServiceBusReceivedMessage
@@ -186,50 +185,25 @@ class ReceiverMiddleware(ServiceBusMiddleware):
 
     async def _results_handler(self) -> None:
         """
-        Method called in background thread as task for result such as nack/ack handling
+        Method called in background thread as task for result such as nack/ack/fail handling
         """
         while True:
-            action, raw_message = await self.broker.ack_nack_queue.get()
-            method = getattr(self, action)
-            await method(raw_message)
+            result: Result = await self.broker.ack_nack_queue.get()
+            await self._handle(result)
 
-    async def ack(self, raw_message: ServiceBusReceivedMessage) -> None:
-        receiver = self.pop_receiver(raw_message)
-        # retrieve receiver reference for given message
-        # check if raw message is already settled else error is raised - private method
-        if receiver and not raw_message._settled:  # noqa: SLF001
-            await receiver.complete_message(raw_message)
+    async def _handle(self, result: Result) -> None:
+        receiver = self.pop_receiver(result.message)
+        if receiver and not result.message._settled:  # noqa: SLF001
+            result_ = asdict(result)
+            action = result_.pop("action")
+            await getattr(receiver, action)(**result_)
         else:
             self.logger.warning(
-                "Cannot nack message %d: %s, receiver reference is missing",
-                id(raw_message),
-                str(raw_message),
+                "Cannot %r message %d: %s",
+                result.action,
+                id(result.message),
+                str(result.message),
             )
-
-    async def nack(self, raw_message: ServiceBusReceivedMessage) -> None:
-        receiver = self.pop_receiver(raw_message)
-        # retrieve receiver reference for given message
-        # check if raw message is already settled else error is raised - private method
-        if receiver and not raw_message._settled:  # noqa: SLF001
-            await receiver.abandon_message(raw_message)
-        else:
-            self.logger.warning(
-                "Cannot nack message %d: %s, receiver reference is missing",
-                id(raw_message),
-                str(raw_message),
-            )
-
-    async def _on_lock_renew_failure(
-        self,
-        renewable: ServiceBusSession | ServiceBusReceivedMessage,
-        exc: Exception | None,
-    ) -> None:
-        self.logger.warning(
-            "Lock renewal failed for message %d: %s",
-            id(renewable),
-            str(renewable),
-            exc_info=exc,
-        )
 
     def stop_client(self, exc: threading.ExceptHookArgs) -> None:
         asyncio.run(self.broker.disconnect())
@@ -243,21 +217,12 @@ class ReceiverMiddleware(ServiceBusMiddleware):
     async def after_fail_message(
         self, *, consumer: Consumer, message: CloudEvent, exc: Fail
     ) -> None:
-        await self.broker.ack_nack_queue.put(("fail", message.raw))
+        await self.broker.ack_nack_queue.put(
+            FailResult(message=message.raw, reason=str(exc.__cause__))
+        )
         self.logger.error(
             "Failed message: %r for consumer: %s",
             message,
             consumer.topic,
             exc_info=exc,
         )
-
-    async def fail(self, raw_message: ServiceBusReceivedMessage) -> None:
-        receiver = self.get_receiver(raw_message)
-        if receiver and not raw_message._settled:  # noqa: SLF001
-            await receiver.dead_letter_message(raw_message)
-        else:
-            self.logger.warning(
-                "Cannot move to Dead Letter Queue. Message%d: %s, receiver reference is missing",
-                id(raw_message),
-                str(raw_message),
-            )
