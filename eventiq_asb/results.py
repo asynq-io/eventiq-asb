@@ -1,30 +1,31 @@
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Union
 
 from azure.servicebus import ServiceBusReceivedMessage
 
 
 @dataclass
-class Result:
+class BaseResult:
     message: ServiceBusReceivedMessage
-    type: str
-    action: str
     extras: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
-class Fail(Result):
+class Fail(BaseResult):
     type: str = "fail"
     action: str = "dead_letter_message"
 
 
 @dataclass
-class Ack(Result):
+class Ack(BaseResult):
     type: str = "ack"
     action: str = "complete_message"
 
 
 @dataclass
-class Nack(Result):
+class Nack(BaseResult):
     type: str = "nack"
     action: str = "abandon_message"
+
+
+Result = Union[Ack, Nack, Fail]
