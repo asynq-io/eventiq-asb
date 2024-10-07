@@ -1,28 +1,30 @@
-from typing import Any, Optional
+from dataclasses import dataclass, field
+from typing import Any
 
 from azure.servicebus import ServiceBusReceivedMessage
-from pydantic import BaseModel, Field
 
 
-class Result(BaseModel):
-    type: str
+@dataclass
+class Result:
     message: ServiceBusReceivedMessage
-    extras: Optional[dict[str, Any]] = Field(default_factory=dict)
+    type: str
     action: str
+    extras: dict[str, Any] = field(default_factory=dict)
 
-    model_config = {"arbitrary_types_allowed": True}
 
-
+@dataclass
 class Fail(Result):
     type: str = "fail"
     action: str = "dead_letter_message"
 
 
+@dataclass
 class Ack(Result):
     type: str = "ack"
     action: str = "complete_message"
 
 
+@dataclass
 class Nack(Result):
     type: str = "nack"
     action: str = "abandon_message"
