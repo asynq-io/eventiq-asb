@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from dataclasses import asdict
 from typing import TYPE_CHECKING, cast
 
 import anyio
@@ -193,13 +194,13 @@ class ReceiverMiddleware(ServiceBusMiddleware):
     async def _handle(self, result: Result) -> None:
         receiver = self.pop_receiver(result.message)
         if receiver and not result.message._settled:  # noqa: SLF001
-            await getattr(receiver, result.action)(
-                message=result.message, **result.extras
-            )
+            result_ = asdict(result)
+            action = result_.pop("action")
+            await getattr(receiver, action)(**result_)
         else:
             self.logger.warning(
                 "Cannot %r message %d: %s",
-                result.type,
+                result.action,
                 id(result.message),
                 str(result.message),
             )
@@ -217,7 +218,7 @@ class ReceiverMiddleware(ServiceBusMiddleware):
         self, *, consumer: Consumer, message: CloudEvent, exc: Fail
     ) -> None:
         await self.broker.ack_nack_queue.put(
-            FailResult(message=message.raw, extras={"reason": str(exc.__cause__)})
+            FailResult(message=message.raw, reason=str(exc.__cause__))
         )
         self.logger.error(
             "Failed message: %r for consumer: %s",

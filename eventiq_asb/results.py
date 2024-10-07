@@ -1,5 +1,5 @@
-from dataclasses import dataclass, field
-from typing import Any, Union
+from dataclasses import dataclass
+from typing import Union
 
 from azure.servicebus import ServiceBusReceivedMessage
 
@@ -7,24 +7,21 @@ from azure.servicebus import ServiceBusReceivedMessage
 @dataclass
 class BaseResult:
     message: ServiceBusReceivedMessage
-    extras: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class Fail(BaseResult):
-    type: str = "fail"
+    reason: str
     action: str = "dead_letter_message"
 
 
 @dataclass
 class Ack(BaseResult):
-    type: str = "ack"
     action: str = "complete_message"
 
 
 @dataclass
 class Nack(BaseResult):
-    type: str = "nack"
     action: str = "abandon_message"
 
 
