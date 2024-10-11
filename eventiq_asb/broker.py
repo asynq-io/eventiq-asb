@@ -81,7 +81,9 @@ class AzureServiceBusBroker(UrlBroker[ServiceBusReceivedMessage, None]):
 
     async def connect(self) -> None:
         if self._client is None:
-            self._client = ServiceBusClient.from_connection_string(self.url)
+            self._client = ServiceBusClient.from_connection_string(
+                self.url, **self.connection_options
+            )
             self._publisher = self._client.get_topic_sender(self.topic_name)
 
     async def disconnect(self) -> None:
