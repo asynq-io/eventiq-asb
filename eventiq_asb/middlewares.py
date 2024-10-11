@@ -213,6 +213,8 @@ class ReceiverMiddleware(ServiceBusMiddleware):
             exc.exc_type,
             exc_info=exc.exc_value,
         )
+        # fail-safe switch when asyncio fails for some reason
+        self.broker._client = None  # noqa: SLF001
 
     async def after_fail_message(
         self, *, consumer: Consumer, message: CloudEvent, exc: Fail
