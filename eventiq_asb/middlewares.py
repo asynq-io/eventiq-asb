@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import threading
-from dataclasses import asdict
 from typing import TYPE_CHECKING, cast
 
 import anyio
@@ -194,7 +193,7 @@ class ReceiverMiddleware(ServiceBusMiddleware):
     async def _handle(self, result: Result) -> None:
         receiver = self.pop_receiver(result.message)
         if receiver and not result.message._settled:  # noqa: SLF001
-            result_ = asdict(result)
+            result_ = result.dict()
             action = result_.pop("action")
             await getattr(receiver, action)(**result_)
         else:
