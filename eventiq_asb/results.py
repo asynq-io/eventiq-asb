@@ -10,8 +10,8 @@ class BaseResult(ABC):
     message: ServiceBusReceivedMessage
 
     @abstractmethod
-    def dict(self) -> dict:
-        ...
+    def dict(self) -> dict: ...
+
 
 @dataclass
 class Fail(BaseResult):
@@ -25,6 +25,7 @@ class Fail(BaseResult):
             "reason": self.reason,
         }
 
+
 @dataclass
 class Ack(BaseResult):
     action: str = "complete_message"
@@ -35,6 +36,7 @@ class Ack(BaseResult):
             "action": self.action,
         }
 
+
 @dataclass
 class Nack(BaseResult):
     action: str = "abandon_message"
@@ -44,5 +46,6 @@ class Nack(BaseResult):
             "message": self.message,
             "action": self.action,
         }
+
 
 Result = Union[Ack, Nack, Fail]
