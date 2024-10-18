@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Union
+from typing import Any, Union
 
 from azure.servicebus import ServiceBusReceivedMessage
 
@@ -10,7 +10,8 @@ class BaseResult(ABC):
     message: ServiceBusReceivedMessage
 
     @abstractmethod
-    def dict(self) -> dict: ...
+    def dict(self) -> dict[str, Any]:
+        raise NotImplementedError
 
 
 @dataclass
@@ -18,7 +19,7 @@ class Fail(BaseResult):
     reason: str
     action: str = "dead_letter_message"
 
-    def dict(self) -> dict:
+    def dict(self) -> dict[str, Any]:
         return {
             "message": self.message,
             "action": self.action,
@@ -30,7 +31,7 @@ class Fail(BaseResult):
 class Ack(BaseResult):
     action: str = "complete_message"
 
-    def dict(self) -> dict:
+    def dict(self) -> dict[str, Any]:
         return {
             "message": self.message,
             "action": self.action,
@@ -41,7 +42,7 @@ class Ack(BaseResult):
 class Nack(BaseResult):
     action: str = "abandon_message"
 
-    def dict(self) -> dict:
+    def dict(self) -> dict[str, Any]:
         return {
             "message": self.message,
             "action": self.action,
